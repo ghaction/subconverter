@@ -10,7 +10,11 @@ ENDIF()
 SET(CMAKE_CXX_STANDARD 20)
 
 IF(NOT MSVC)
-    ADD_COMPILE_OPTIONS(-Wall -Wextra -Wno-unused-parameter -Wno-unused-result)
+    ADD_COMPILE_OPTIONS(-Wall -Wextra -Wno-unused-parameter -Wno-unused-result -Wno-shadow -Wno-deprecated-declarations -Wno-deprecated-copy)
+    IF(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # -Wno-unknown-warning-option silences errors for Clang-specific flags not supported by older Clang versions
+        ADD_COMPILE_OPTIONS(-Wno-unknown-warning-option -Wno-cast-function-type-mismatch -Wno-deprecated-literal-operator -Wno-nontrivial-memcall)
+    ENDIF()
 ELSE()
     ADD_COMPILE_OPTIONS(/W4)
 ENDIF()
@@ -21,6 +25,18 @@ OPTION(USING_MALLOC_TRIM "Call malloc_trim after processing request to lower mem
 #now using internal MD5 calculation
 #OPTION(USING_MBEDTLS "Use mbedTLS instead of OpenSSL for MD5 calculation." OFF)
 OPTION(BUILD_STATIC_LIBRARY "Build a static library containing only the essential part." OFF)
+OPTION(FORCE_STATIC_DEPS "Prefer linking static libraries for third-party dependencies." ON)
+
+# Prefer static archives when FORCE_STATIC_DEPS is ON
+IF(FORCE_STATIC_DEPS)
+    SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    MESSAGE(STATUS "Preferring static archives (.a)")
+ENDIF()
+
+# On MinGW, statically link C/C++ runtime
+IF(MINGW)
+    ADD_LINK_OPTIONS(-static-libgcc -static-libstdc++)
+ENDIF()
 
 INCLUDE(CheckCXXSourceCompiles)
 CHECK_CXX_SOURCE_COMPILES(
@@ -31,7 +47,7 @@ int main(){std::to_string(0);}
 
 IF(NOT BUILD_STATIC_LIBRARY)
 
-ADD_EXECUTABLE(${BUILD_TARGET_NAME} 
+ADD_EXECUTABLE(${BUILD_TARGET_NAME}
     src/generator/config/nodemanip.cpp
     src/generator/config/ruleconvert.cpp
     src/generator/config/subexport.cpp
@@ -74,11 +90,60 @@ TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${CMAKE_THREAD_LIBS_INIT})
 #TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${LIBEVENT_INCLUDE_DIR})
 #TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${LIBEVENT_LIBRARY})
 
-FIND_PACKAGE(CURL 7.54.0 REQUIRED)
-TARGET_LINK_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_LIBRARY_DIRS})
-TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
-TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} CURL::libcurl)
+# On MinGW with static deps, find static libcurl manually since the config only provides shared targets
+IF(FORCE_STATIC_DEPS AND MINGW)
+    FIND_PACKAGE(CURL 7.54.0 REQUIRED)
+    TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
+    FIND_LIBRARY(CURL_STATIC_LIB NAMES curl REQUIRED)
+    TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${CURL_STATIC_LIB})
+    MESSAGE(STATUS "Forcing static libcurl: ${CURL_STATIC_LIB}")
+ELSE()
+    FIND_PACKAGE(CURL 7.54.0 REQUIRED)
+    TARGET_LINK_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_LIBRARY_DIRS})
+    TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
+    TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} CURL::libcurl)
+ENDIF()
 TARGET_COMPILE_DEFINITIONS(${BUILD_TARGET_NAME} PRIVATE -DCURL_STATICLIB)
+
+# Extra static dependency linking for libcurl under MinGW
+IF(FORCE_STATIC_DEPS AND MINGW)
+    # Derive MinGW prefix from the static curl library already found
+    GET_FILENAME_COMPONENT(_MINGW_PREFIX "${CURL_STATIC_LIB}" DIRECTORY)
+    GET_FILENAME_COMPONENT(_MINGW_PREFIX "${_MINGW_PREFIX}" DIRECTORY)
+    MESSAGE(STATUS "Using MinGW prefix for static deps: ${_MINGW_PREFIX}")
+    # Common static dependency libraries for libcurl
+    # They may not all be present depending on build configuration; link those that exist.
+    SET(_STATIC_DEPS
+        ngtcp2_crypto_ossl
+        nghttp3
+        ngtcp2
+        nghttp2
+        brotlidec
+        brotlienc
+        brotlicommon
+        zstd
+        psl
+        idn2
+        unistring
+        iconv
+        ssh2
+        ldap
+        lber
+        z
+        ssl
+        crypto)
+    FOREACH(_dep ${_STATIC_DEPS})
+        SET(_static_path "${_MINGW_PREFIX}/lib/lib${_dep}.a")
+        IF(EXISTS "${_static_path}")
+            TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} "${_static_path}")
+            MESSAGE(STATUS "Link static lib: ${_static_path}")
+        ELSE()
+            MESSAGE(WARNING "Static lib not found (skipping): ${_static_path}")
+        ENDIF()
+    ENDFOREACH()
+    # Ensure Windows libraries for networking, crypto, LDAP, and bcrypt
+    TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ws2_32 crypt32 wldap32 bcrypt secur32 iphlpapi)
+ENDIF()
 
 FIND_PACKAGE(Rapidjson REQUIRED)
 TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${RAPIDJSON_INCLUDE_DIRS})
@@ -93,6 +158,7 @@ TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${YAML_CPP_INCLUDE_DIRS}
 TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${YAML_CPP_LIBRARY})
 TARGET_COMPILE_DEFINITIONS(${BUILD_TARGET_NAME} PRIVATE -DYAML_CPP_STATIC_DEFINE)
 
+# CMAKE_FIND_LIBRARY_SUFFIXES is already set to prefer .a when FORCE_STATIC_DEPS is ON
 FIND_PACKAGE(PCRE2 REQUIRED)
 TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${PCRE2_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${PCRE2_LIBRARY})
@@ -101,6 +167,7 @@ TARGET_COMPILE_DEFINITIONS(${BUILD_TARGET_NAME} PRIVATE -DPCRE2_STATIC)
 FIND_PACKAGE(QuickJS REQUIRED)
 TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${QUICKJS_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${QUICKJS_LIBRARIES})
+TARGET_COMPILE_DEFINITIONS(${BUILD_TARGET_NAME} PRIVATE -DJS_SetHostUnhandledPromiseRejectionTracker=JS_SetHostPromiseRejectionTracker)
 
 FIND_PACKAGE(LibCron REQUIRED)
 TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${LIBCRON_INCLUDE_DIRS})
