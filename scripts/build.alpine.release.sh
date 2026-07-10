@@ -10,7 +10,7 @@ step() { echo -e "\n==> $1\n"; }
 
 # --- Install system dependencies ---
 step "Installing build dependencies"
-apk add --no-cache --virtual .build-deps bash git nodejs npm gcc g++ build-base linux-headers cmake make autoconf automake libtool python3 mbedtls-dev mbedtls-static curl-dev curl-static openssl-dev zlib-dev zlib-static rapidjson-dev pcre2-dev pcre2-static yaml-cpp-dev libpsl-dev libpsl-static c-ares-dev nghttp2-dev nghttp2-static
+apk add --no-cache --virtual .build-deps bash git nodejs npm gcc g++ build-base linux-headers cmake make autoconf automake libtool python3 mbedtls-dev mbedtls-static curl-dev curl-static openssl-dev openssl-libs-static zlib-dev zlib-static rapidjson-dev pcre2-dev pcre2-static libpsl-dev libpsl-static c-ares-dev nghttp2-dev nghttp2-static brotli-dev brotli-static zstd-dev zstd-static libidn2-dev libidn2-static libunistring-dev libunistring-static
 
 # --- Compiler flags ---
 export CXXFLAGS="${CXXFLAGS:-} -Wno-shadow -Wno-deprecated-declarations -Wno-deprecated-copy -Wno-sign-conversion -Wno-conversion -isystem /usr/local/include"
@@ -50,6 +50,12 @@ cmake_build_install libcron "" "." libcron
 
 step "Building toml11"
 build_cmake https://github.com/ToruNiina/toml11 toml11 "-DCMAKE_CXX_STANDARD=11"
+
+step "Building yaml-cpp"
+git clone --depth=1 https://github.com/jbeder/yaml-cpp yaml-cpp
+cmake -S yaml-cpp -B yaml-cpp/build -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_TESTS=OFF -DYAML_BUILD_SHARED_LIBS=OFF
+cmake --build yaml-cpp/build -j "$BUILD_JOBS"
+cmake --install yaml-cpp/build
 
 # --- Build subconverter ---
 step "Building subconverter"

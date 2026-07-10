@@ -13,7 +13,7 @@ ARG SHA=""
 WORKDIR /build
 
 # Install build dependencies
-RUN apk add --no-cache bash git nodejs npm gcc g++ build-base linux-headers cmake make autoconf automake libtool python3 mbedtls-dev mbedtls-static curl-dev curl-static openssl-dev zlib-dev zlib-static rapidjson-dev pcre2-dev pcre2-static yaml-cpp-dev libpsl-dev libpsl-static c-ares-dev nghttp2-dev nghttp2-static
+RUN apk add --no-cache bash git nodejs npm gcc g++ build-base linux-headers cmake make autoconf automake libtool python3 mbedtls-dev mbedtls-static curl-dev curl-static openssl-dev openssl-libs-static zlib-dev zlib-static rapidjson-dev pcre2-dev pcre2-static libpsl-dev libpsl-static c-ares-dev nghttp2-dev nghttp2-static brotli-dev brotli-static zstd-dev zstd-static libidn2-dev libidn2-static libunistring-dev libunistring-static
 
 # Build quickjspp
 RUN git clone --depth=1 https://github.com/ftk/quickjspp && \
@@ -42,6 +42,14 @@ RUN git clone --depth=1 https://github.com/ToruNiina/toml11 && \
     cmake --build build -j ${THREADS} && \
     cmake --install build && \
     cd .. && rm -rf toml11
+
+# Build yaml-cpp
+RUN git clone --depth=1 https://github.com/jbeder/yaml-cpp && \
+    cd yaml-cpp && \
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_TESTS=OFF -DYAML_BUILD_SHARED_LIBS=OFF && \
+    cmake --build build -j ${THREADS} && \
+    cmake --install build && \
+    cd .. && rm -rf yaml-cpp
 
 # Clone and build subconverter
 RUN git clone --depth=1 ${REPO_URL} subconverter && \

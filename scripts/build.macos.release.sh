@@ -11,7 +11,7 @@ step() { echo -e "\n==> $1\n"; }
 
 # --- Install dependencies ---
 step "Installing dependencies"
-brew reinstall rapidjson zlib pcre2 pkgconfig curl yaml-cpp openssl@3
+brew reinstall rapidjson zlib pcre2 pkgconfig curl openssl@3
 
 # --- Environment setup ---
 export PATH="${BREW_PREFIX}/bin:$PATH"
@@ -55,9 +55,15 @@ cmake_build_install libcron "" "." libcron
 step "Building toml11"
 build_cmake https://github.com/ToruNiina/toml11 toml11 "-DCMAKE_CXX_STANDARD=11"
 
+step "Building yaml-cpp"
+git clone --depth=1 https://github.com/jbeder/yaml-cpp yaml-cpp
+cmake -S yaml-cpp -B yaml-cpp/build -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_TESTS=OFF -DYAML_BUILD_SHARED_LIBS=OFF
+cmake --build yaml-cpp/build -j "$BUILD_JOBS"
+sudo cmake --install yaml-cpp/build
+
 # --- Build subconverter ---
 step "Building subconverter"
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_DEPS=OFF -DCURL_ROOT="${BREW_PREFIX}/opt/curl" -DOPENSSL_ROOT_DIR="${BREW_PREFIX}/opt/openssl@3"
 cmake --build build -j "$BUILD_JOBS"
 
 # macOS special linking: hide all internal symbols, use static libs

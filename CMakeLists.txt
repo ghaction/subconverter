@@ -1,4 +1,5 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.10)
+CMAKE_POLICY(SET CMP0074 NEW)
 PROJECT(subconverter LANGUAGES CXX)
 SET(BUILD_TARGET_NAME ${PROJECT_NAME})
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
@@ -91,13 +92,12 @@ TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${CMAKE_THREAD_LIBS_INIT})
 #TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${LIBEVENT_INCLUDE_DIR})
 #TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${LIBEVENT_LIBRARY})
 
-# On MinGW with static deps, find static libcurl manually since the config only provides shared targets
-IF(FORCE_STATIC_DEPS AND MINGW)
+# When using static deps, find static libcurl manually
+IF(FORCE_STATIC_DEPS)
     FIND_PACKAGE(CURL 7.54.0 REQUIRED)
     TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
-    FIND_LIBRARY(CURL_STATIC_LIB NAMES curl REQUIRED)
-    TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${CURL_STATIC_LIB})
-    MESSAGE(STATUS "Forcing static libcurl: ${CURL_STATIC_LIB}")
+    TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${CURL_LIBRARY})
+    MESSAGE(STATUS "Forcing static libcurl: ${CURL_LIBRARY}")
 ELSE()
     FIND_PACKAGE(CURL 7.54.0 REQUIRED)
     TARGET_LINK_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_LIBRARY_DIRS})
@@ -109,7 +109,7 @@ TARGET_COMPILE_DEFINITIONS(${BUILD_TARGET_NAME} PRIVATE -DCURL_STATICLIB)
 # Extra static dependency linking for libcurl under MinGW
 IF(FORCE_STATIC_DEPS AND MINGW)
     # Derive MinGW prefix from the static curl library already found
-    GET_FILENAME_COMPONENT(_MINGW_PREFIX "${CURL_STATIC_LIB}" DIRECTORY)
+    GET_FILENAME_COMPONENT(_MINGW_PREFIX "${CURL_LIBRARY}" DIRECTORY)
     GET_FILENAME_COMPONENT(_MINGW_PREFIX "${_MINGW_PREFIX}" DIRECTORY)
     MESSAGE(STATUS "Using MinGW prefix for static deps: ${_MINGW_PREFIX}")
     # Common static dependency libraries for libcurl
@@ -144,6 +144,20 @@ IF(FORCE_STATIC_DEPS AND MINGW)
     ENDFOREACH()
     # Ensure Windows libraries for networking, crypto, LDAP, and bcrypt
     TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ws2_32 crypt32 wldap32 bcrypt secur32 iphlpapi)
+ENDIF()
+
+# Static curl transitive dependencies on Linux/macOS
+IF(FORCE_STATIC_DEPS AND NOT MINGW AND NOT WIN32)
+    SET(_CURL_TRANSITIVE_DEPS nghttp2 cares psl brotlidec brotlicommon zstd z idn2 unistring)
+    FOREACH(_dep ${_CURL_TRANSITIVE_DEPS})
+        FIND_LIBRARY(_CURL_DEP_${_dep} NAMES ${_dep})
+        IF(_CURL_DEP_${_dep})
+            TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${_CURL_DEP_${_dep}})
+            MESSAGE(STATUS "Link static curl dependency: ${_CURL_DEP_${_dep}}")
+        ELSE()
+            MESSAGE(WARNING "Static curl dependency not found (skipping): ${_dep}")
+        ENDIF()
+    ENDFOREACH()
 ENDIF()
 
 FIND_PACKAGE(Rapidjson REQUIRED)
